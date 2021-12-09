@@ -1,0 +1,211 @@
+---
+title: "Task3Report"
+author: "Mi Zhang"
+date: "12/7/2021"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, warning=FALSE, message = FALSE,highlight=FALSE)
+library(tidyverse)
+library(scales)
+library(methods)
+library(knitr)
+library(kableExtra)
+library(janeaustenr)
+library(dplyr)
+library(stringr)
+library(tidytext)
+library(gutenbergr)
+library(scales)
+library(png)
+library(grid)
+library(ggplot2)
+library(tidyr)
+library(magrittr)
+library(sentimentr)
+library(wordcloud)
+
+```
+
+## Task Three
+
+This task is about how we can upload our book into the tnum space and the table below proves that I am able to query my book from tnum space.
+
+```{r message=FALSE}
+# set up tnum space and upload the book into tnum.
+library(tnum)
+tnum.authorize("mssp1.bu.edu")
+tnum.setSpace("test2")
+source("Book2TN-v6A-1.R")
+love_paddington <- read.table('Love at Paddington.txt', header=TRUE)
+#tnBooksFromLines(love_paddington$text, "love_paddington")
+
+# query the words from tnum space 
+q1 <- tnum.query('love_paddington/section# has text',max=2000) %>% tnum.objectsToDf() 
+
+# show that I am able to query my book from tnum 
+knitr::kable(q1 %>% select(subject:numeric.value)%>% head())
+```
+
+
+Now, I am going to using sentimentr to score the sentiment words in the book. The plot below shows an average sentiment score in each chapter. I noticed that chapter has low sentiment score and went back to skim the chapter. It made senses to me because chapter three mentioned that a well prepared trip had been ruined by a storm and several characters in the book refected bad moods due to the storm. In addtion, towards the end of the book, the main character Gertie and Henry struggled about their social class gap and financial problem, so the average sentiment score goes down on chapter ten which made sense to me as the plotline moves on. 
+
+```{r message=FALSE}
+# separate the data into more tidy form
+
+tidy_paddington2<- q1 %>% separate(col=subject,
+                  into = c("path1","section","paragraph","sentence"), 
+                  sep = "/", 
+                  fill = "right") %>% 
+  select(section:string.value)
+
+# using mutate() to make the tidy data into numeric value 
+tidy_paddington2<- tidy_paddington2%>% mutate_at(c('section','paragraph','sentence'),~str_extract_all(.,"\\d+") %>% unlist() %>% as.numeric())
+
+# using sentimentr to score the word in the book 
+paddington_score<-tidy_paddington2%>% dplyr::mutate(sentence_split = get_sentences(string.value))%$%
+    sentiment_by(sentence_split, list(section)) %>% mutate(sentimentr_scale=scale(ave_sentiment))
+
+ggplot(data=paddington_score)+
+    geom_bar(aes(x=section, y=sentimentr_scale),fill="#47C2C6", stat="identity") + theme_bw()+scale_x_continuous(n.breaks = 11)+ ggtitle("Sentiment Score Analysis for Each Chapter")+ xlab("chapter")
+
+
+```
+
+## Compare two methods
+
+I choose bing lexicon for the comparison because bing lexicon categorize words in binary fashion and it would easier to compare to the sentiment score in sentimentr. As the plot shows below, I noticed that both methods seems to peak and dip at same places except for Chapter Four, Seven, and Nine. But for the overall plotline, those two sentiment analysis method matched. 
+
+```{r }
+# get tidy data for the book
+tidy_paddington<- love_paddington %>%
+  mutate(
+    linenumber = row_number(),
+    chapter = cumsum(str_detect(text, 
+                                regex("<CHAPTER", 
+                                      ignore_case = TRUE)))) %>%
+  ungroup() %>%
+  unnest_tokens(word, text)
+
+# using inner_join to combine words in bing dictionary and in the book
+
+paddington_bing<-tidy_paddington %>% 
+    inner_join(get_sentiments("bing")) %>%
+    mutate(method = "Bing et al.") %>% 
+    count(method, index = chapter, sentiment) %>%
+  pivot_wider(names_from = sentiment,
+              values_from = n,
+              values_fill = 0) %>% 
+  mutate(sentiment = positive - negative)
+
+# scale sentiment to keep unit same 
+paddington_bing<-paddington_bing %>% mutate(bing_scale=scale(sentiment)) %>% select(method,index,bing_scale)
+
+# change colname in order to join by section
+colnames(paddington_bing)[2]='section'
+
+# merge two data frames
+
+bing_paddington<-left_join(paddington_score,paddington_bing,by='section')%>% select(section,bing_scale,sentimentr_scale)
+
+# use pivot longer for ggplot
+bing_paddington_plot<-bing_paddington %>% pivot_longer(cols=c('sentimentr_scale','bing_scale'),names_to = 'sentiment')
+# create plot for comparison
+
+bing_paddington_plot%>%ggplot(aes(y=value,x=factor(section))) +
+  geom_bar(aes(fill=factor(sentiment)),stat='identity',position = "dodge",width = 0.7)+theme_bw()+ ggtitle("Comparason of Bing_scale and Sentimentr_scale")+ xlab("chapter")
+
+```
+\newpage
+
+## Extra Credit
+
+Gertie and Henry are the two main character of the book, "Love at Paddington", and I am going to do sentiment analysis of them in each chapter using tnum.query. Tnum shows that Gertie's name appeared in the book for 269 times. As we can see the plot below, Gertie involved in a wider range of sentiment change from negative to positive in the book . This is reasonable because the book focus more about how Gertie as a female at her time is able to break people's stereotypical opinion about a middle working-class girl who had the romance relationship with Henry from the upper-class society. Through the sentiment analysis, we can also see how Gertie's sentiment struggles about the relationship. 
+
+
+```{r}
+
+gertie <- tnum.query("love_paddington/section# has * = REGEXP(\"Gertie\")", max=300)%>%
+  tnum.objectsToDf()
+gertie1<- gertie %>% separate(col=subject,
+                  into = c("path1","section","paragraph","sentence"), 
+                  sep = "/", 
+                  fill = "right") %>% 
+  select(section:string.value)
+
+# using mutate() to make the tidy data into numeric value 
+gertie1<- gertie1%>% mutate_at(c('section','paragraph','sentence'),~str_extract_all(.,"\\d+") %>% unlist() %>% as.numeric())
+
+# using sentimentr to score the word in the book 
+ger_score<-gertie1%>% dplyr::mutate(sentence_split = get_sentences(string.value))%$%
+    sentiment_by(sentence_split, list(section)) %>% mutate(sentimentr_scale=scale(ave_sentiment))
+
+ggplot(data=ger_score)+
+    geom_bar(aes(x=section, y=sentimentr_scale),fill="#47C2C6", stat="identity") + theme_bw()+scale_x_continuous(n.breaks = 11)+ ggtitle("Sentiment Score Analysis for Gertie")+ xlab("chapter")
+
+```
+
+The plot below is using the same tnum.query technique to analyze sentiments related to Henry in each chapter. Tnum shows that Gertie's name appeared in the book for 96 times.We can see that Henry involved in a small range of sentiment changes throughout the book except in Chapter 8 and 10. I guess the relation between him and Gertie is changing him internally. 
+
+```{r}
+henry <- tnum.query("love_paddington/section:# has * = REGEXP(\"Henry\")", max=200)%>%
+  tnum.objectsToDf()
+henry1<- henry %>% separate(col=subject,
+                  into = c("path1","section","paragraph","sentence"), 
+                  sep = "/", 
+                  fill = "right") %>% 
+  select(section:string.value)
+
+# using mutate() to make the tidy data into numeric value 
+henry1<-henry1%>% mutate_at(c('section','paragraph','sentence'),~str_extract_all(.,"\\d+") %>% unlist() %>% as.numeric())
+
+# using sentimentr to score the word in the book 
+hen_score<-henry1%>% dplyr::mutate(sentence_split = get_sentences(string.value))%$%
+    sentiment_by(sentence_split, list(section)) %>% mutate(sentimentr_scale=scale(ave_sentiment))
+
+ggplot(data=hen_score)+
+    geom_bar(aes(x=section, y=sentimentr_scale),fill="#47C2C6", stat="identity") + theme_bw()+scale_x_continuous(n.breaks = 11)+ ggtitle("Sentiment Score Analysis for Henry")+ xlab("chapter")
+```
+
+\newpage
+
+For the plot below, I am just curious about how the sentiment range change between the two characters.
+
+```{r}
+# detect setence related to the main characters 
+gertie_henry <-tidy_paddington2 %>%
+  mutate(Gertie=str_match(tidy_paddington2$string.value,regex('(Gertie)'))[,1],
+                      Henry=str_match(tidy_paddington2$string.value,regex('(Henry)'))[,1])
+
+# score the sentiment words related to the main characters      
+gertie_henry$score <-gertie_henry %>% dplyr::mutate(sentence_split = get_sentences(string.value)) %$%
+    sentiment_by(sentence_split) %>% `$`(ave_sentiment)
+# subset sentiment score related to Gertie
+gertie_subset <-gertie_henry %>% 
+  subset(Gertie=="Gertie")
+# subset sentiment score related to Henry
+henry_subset <-gertie_henry %>% 
+  subset(Henry=="Henry")
+ggplot()+
+  geom_bar(data= gertie_subset, aes(x=section, y=score,fill="Gertie"), stat="identity")+
+  geom_bar(data= henry_subset, aes(x=section, y=score, fill="Henry"), stat="identity")+ xlab("chapter")+ ggtitle("Sentiment Score Comparison for Two Main Characters")
+  
+
+
+```
+
+## Acknowledgement 
+
+I would like to thank my classmates(Yifeng He, Shicong Wang, Boyu Chen) and TA Runqi Zhao who were more than generous with their expertise and precious times. A special thanks to Yuli Jin who explained the project to me and helped me with coding during the entire project. 
+
+
+# reference 
+
+- https://github.com/orazdow/TrueNum
+
+- https://www.tidytextmining.com/dtm.html
+
+- https://cran.r-project.org/web/packages/sentimentr/sentimentr.pdf
+
+- Professor Haviland's lecture notes

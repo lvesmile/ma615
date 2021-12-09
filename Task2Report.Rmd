@@ -1,0 +1,204 @@
+---
+title: "Task2Report"
+author: "Mi Zhang"
+date: "12/5/2021"
+output: 
+  pdf_document: 
+    latex_engine: lualatex
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, warning=FALSE, message = FALSE,highlight=FALSE)
+library(tidyverse)
+library(scales)
+library(methods)
+library(knitr)
+library(kableExtra)
+library(janeaustenr)
+library(dplyr)
+library(stringr)
+library(tidytext)
+library(gutenbergr)
+library(scales)
+library(png)
+library(grid)
+library(ggplot2)
+library(tidyr)
+library(wordcloud)
+```
+
+## Love at Paddington
+
+"Love at Paddington" is written by W. Pett Ridge and pubished in 1912. It is a story of a middle class London girl, Gertie, involved in a romance with a man of the upper class, we later know his name is Henry. For the first several chapters, they did not exchange their name because they knew the gap in their social classes cannot let them go far, they haven't exchanged names. As the story goes on, things became more complicated and they almost engaged. It is interesting that how Gertie was able to stay so awaken about her identity and deal the relationship between Henry and herself. At end of story, Gertie decided to move on and back to her social class in which she showed herself as an independent and mature woman.    
+
+# Tidy data 
+After download the book from gutenberg package, I converted the text to tidy format using unnest_tokens funtion and using group_by and mutate function to set up columns for linenumbers, chapters, and words. The table below shows a part of data frame of the book.
+
+```{r}
+data(stop_words)
+paddington<- gutenberg_download(26135)
+#write.table(paddington,'Love at Paddington.txt',row.names = F)
+
+# tidy my book 
+tidy_paddington<- paddington %>%
+  mutate(
+    linenumber = row_number(),
+    chapter = cumsum(str_detect(text, 
+                                regex("<CHAPTER", 
+                                      ignore_case = TRUE)))) %>%
+  ungroup() %>%
+  unnest_tokens(word, text)
+#show chunk of my data
+head(tidy_paddington)
+
+
+
+```
+
+## Using Lexicons to analyze sentiments
+
+After I made the tidy text of the book, I started to use three different lexicons to analyze the sentiments of words in my text. It is interesting to see that both nrc and bing lexicon categorize words in the binary fashion into positive or negative, but nrc lexicon did more fine categories for words by categorizing them into different sentiments, like anger, disgust, fear, joy and so on. Afinn lexicon is more unique than above two in which it assigns words with a score between 5 to -5 and positive score is with respect to positive sentiment and vice verso.
+
+we count up how many positive and negative words there are in defined sections of each book. We define an index here to keep track of where we are in the narrative; this index (using integer division) counts up sections of 80 lines of text.
+
+We then use pivot_wider() so that we have negative and positive sentiment in separate columns, and lastly calculate a net sentiment (positive - negative).
+
+
+```{r message=FALSE}
+
+# get_sentiments("afinn")
+# get_sentiments("bing")
+# get_sentiments("nrc")
+
+# index (using integer division) counts up sections of 80 lines of text
+# by doing so help to avoid long sentences that run in multiple lines
+afinn <- tidy_paddington %>% 
+  inner_join(get_sentiments("afinn")) %>% 
+  group_by(index = linenumber %/% 80) %>% 
+  summarise(sentiment = sum(value)) %>% 
+  mutate(method = "AFINN")
+
+# using count(), pivot_wider(), and mutate() to find the net sentiment in each sections of text.
+# by doing so will give me sentiment score as well
+bing_and_nrc <- bind_rows(
+  tidy_paddington%>% 
+    inner_join(get_sentiments("bing")) %>%
+    mutate(method = "Bing et al."),
+ tidy_paddington%>% 
+    inner_join(get_sentiments("nrc") %>% 
+                 filter(sentiment %in% c("positive", 
+                                         "negative"))
+    ) %>%
+    mutate(method = "NRC")) %>%
+  count(method, index = linenumber %/% 80, sentiment) %>%
+  pivot_wider(names_from = sentiment,
+              values_from = n,
+              values_fill = 0) %>% 
+  mutate(sentiment = positive - negative)
+```
+
+The plot below displays all three sentiment lexicons. We can see them displaying peaks and dips at about the same sections in the book, but the absolute values are significantly different. The AFINN and NRC sentiment have more variances, NRC has higher value among the three, and the Bing et al. sentiment show more movement of positive and negative sentiments.
+
+```{r fig.width=6, fig.height=3, message=FALSE}
+# plot 3 sentiment lexicons
+bind_rows(afinn, 
+          bing_and_nrc) %>%
+  ggplot(aes(index, sentiment, fill = method)) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~method, ncol = 1, scales = "free_y")
+```
+
+```{r}
+# #get_sentiments("nrc") %>% 
+#   filter(sentiment %in% c("positive", "negative")) %>% 
+#   count(sentiment)
+# 
+# 
+# #get_sentiments("bing") %>% 
+#   count(sentiment)
+
+```
+
+## Word contribution to Sentiment
+
+Now, I want to know if the words in the book has more negative or positive sentiment. Since bing lexicon categorize words into binary fashion of positive and negative sentiment, by using inner_join() to merge tidy book and bing dictionary will help me to answer the question. We can see that words of positive sentiment appeared more frequently. And "Love at Paddington" is a love romance fiction which does make sense to me that it has more postive sentiments. I also notice that the word "miss" appeared the most often in the sentiment, but "miss" can also be a title for lady.
+
+```{r message=FALSE}
+
+# use count() to find out how much each word contributed to each sentiment
+bing_word_counts <- tidy_paddington%>%
+  inner_join(get_sentiments("bing")) %>%
+  count(word, sentiment, sort = TRUE) %>%
+  ungroup()
+
+bing_word_counts %>%
+  group_by(sentiment) %>%
+  slice_max(n, n = 10) %>% 
+  ungroup() %>%
+  mutate(word = reorder(word, n)) %>%
+  ggplot(aes(n, word, fill = sentiment)) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~sentiment, scales = "free_y") +
+  labs(x = "Contribution of word to sentiment",
+       y = NULL)
+```
+
+
+## Different visualization
+
+Since I have my tidy text, I can use it to do more visualization. The wordcloud below so a mixture of sentiment words in the book. 
+
+```{r fig.height=4, fig.width=3,fig.align='center'}
+#tag positive and negative words using an inner join
+tidy_paddington%>%
+  anti_join(stop_words) %>%
+  count(word) %>%
+  with(wordcloud(word, n, max.words = 100))
+```
+
+\newpage
+
+In order to make better visualization, I add color to identify the positive and negative sentiments and the font size is also corresponding to contribution of the word to sentiment, the bigger the font size means it has more contribution.
+
+```{r fig.height=6, fig.width=7, fig.align='center'}
+library(reshape2)
+#tag positive and negative words using an inner join
+tidy_paddington%>%
+  inner_join(get_sentiments("bing")) %>%
+  count(word, sentiment, sort = TRUE) %>%
+  acast(word ~ sentiment, value.var = "n", fill = 0) %>%
+  comparison.cloud(colors = c("pink", "lightblue"),
+                   max.words =100)
+
+
+```
+
+\newpage
+
+# Extra Credit 
+
+In the Chapter 5 of the book "Text Mining With R", it mention another lexicon which is related to financial sentiments which is "loughran". According to the book,the loughran data divides words into six sentiments: “positive”, “negative”, “litigious”, “uncertain”", “constraining”, and “superfluous”. In order to make better comparason, I just going to use the two sentiments, "positive" and "negative". Since loughran is used for finance, it makes sense that it look different than above lexicons. Indeed, I do not think loughran lexicon is useful for my book. 
+
+```{r}
+library(textdata)
+loughran<- tidy_paddington%>%
+  inner_join(get_sentiments("loughran")) %>%
+  filter(sentiment %in% c("positive", "negative"))%>%
+  mutate(method = "Loughran-McDonald") %>%
+  count(method, index = linenumber %/% 80, sentiment) %>%
+  pivot_wider(names_from = sentiment,
+              values_from = n,
+              values_fill = 0) %>% 
+  mutate(sentiment = positive - negative) %>%
+  ggplot(aes(index, sentiment, fill = method)) +
+  geom_col(show.legend = FALSE) 
+
+loughran
+
+```
+
+## Reference
+
+- https://www.tidytextmining.com/dtm.html
+
+- https://cran.r-project.org/web/packages/sentimentr/sentimentr.pdf
