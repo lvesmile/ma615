@@ -197,7 +197,7 @@ ggplot()+
 
 ## Acknowledgement 
 
-I would like to thank my classmates(Yifeng He, Shicong Wang, Boyu Chen) and TA Runqi Zhao who were more than generous with their expertise and precious times. A special thanks to Yuli Jin who explained the project to me and helped me with coding during the entire project. 
+I would like to thank my classmates(Yifeng He, Shicong Wang, Boyu Chen) and TA Runqi Zhao who were more than generous with their expertise and precious times. A special thanks to Yuli Jin who explained the project to me and helped me with coding throughout the entire project. I would also like to thank Professor Haviland for knowledge about Truenumbers and Sentimentr, thank Allen for introducing Truenumbers, and thank TA Bruce for organizing this project. 
 
 
 # reference 
